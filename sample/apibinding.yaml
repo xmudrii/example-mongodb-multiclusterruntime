@@ -1,0 +1,15 @@
+apiVersion: apis.kcp.io/v1alpha2
+kind: APIBinding
+metadata:
+  name: mongodb
+spec:
+  reference:
+    export:
+      name: mongodb
+      path: "root:mongodb"
+  permissionClaims:
+    - resource: events
+      verbs: ["*"]
+      state: Accepted
+      selector:
+        matchAll: true

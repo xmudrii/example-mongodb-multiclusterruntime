@@ -1,35 +1,96 @@
-# SAP Repository Template
+# Multiclusterruntime Example for MongoDB
 
-Default templates for SAP open source repositories, including LICENSE, .reuse/dep5, Code of Conduct, etc... All repositories on github.com/SAP will be created based on this template.
+This example shows how to build a syncher which syncs objects from kcp workspaces into a separate Kubernetes cluster and afterwards syncs any status updates from the downstream object back into kcp. It includes a demo based on the MongoDB Community Operator.
 
-## To-Do
+It is a barebone example to show that you can build a custom syncher if [api-syncagent](https://github.com/kcp-dev/api-syncagent) is not sufficient for your use-cases. It should be noted that this example does not handle any object collisions or related resources. It is far from production ready!
 
-In case you are the maintainer of a new SAP open source project, these are the steps to do with the template files:
+## How to use this example
 
-- Check if the default license (Apache 2.0) also applies to your project. A license change should only be required in exceptional cases. If this is the case, please change the [license file](LICENSE).
-- Enter the correct metadata for the REUSE tool. See our [wiki page](https://wiki.one.int.sap/wiki/display/ospodocs/Using+the+Reuse+Tool+of+FSFE+for+Copyright+and+License+Information) for details how to do it. You can find an initial .reuse/dep5 file to build on. Please replace the parts inside the single angle quotation marks < > by the specific information for your repository and be sure to run the REUSE tool to validate that the metadata is correct.
-- Adjust the contribution guidelines (e.g. add coding style guidelines, pull request checklists, different license if needed etc.)
-- Add information about your project to this README (name, description, requirements etc). Especially take care for the <your-project> placeholders - those ones need to be replaced with your project name. See the sections below the horizontal line and [our guidelines on our wiki page](https://wiki.one.int.sap/wiki/pages/viewpage.action?pageId=3564976048#GuidelinesforGitHubHealthfiles(Readme,Contributing,CodeofConduct)-Readme.md) what is required and recommended.
-- Remove all content in this README above and including the horizontal line ;)
+1. Create a kind cluster and install the MongoDB Operator
 
-***
+    ```sh
+    export KUBECONFIG=cluster.kubeconfig
+    kind create cluster --name mongodb
+    helm repo add mongodb https://mongodb.github.io/helm-charts
+    helm repo update
+    helm upgrade mongodb mongodb/community-operator --version 0.13.0 --install --namespace mongodb --create-namespace
+    kubectl apply -f sample/mongo-secret.yaml
+    ```
 
-# Our new open source project
+2. Start kcp locally
 
-## About this project
+    ```sh
+    kcp start --bind-address=127.0.0.1
+    ```
 
-*Insert a short description of your project here...*
+3. Create the consumer and mongodb workspace
 
-## Requirements and Setup
+    ```sh
+    export KUBECONFIG=".kcp/admin.kubeconfig"
+    kubectl create workspace consumer
+    kubectl create workspace mongodb
+    ```
 
-*Insert a short description what is required to get your project running...*
+4. Create the ResourceSchema, APIExport, APIBinding & MongoDB namespace
+
+    ```sh
+    kubectl ws :root:mongodb
+    kubectl apply -f sample/mongo-api.yaml
+    kubectl ws :root:consumer
+    kubectl apply -f sample/apibinding.yaml
+    kubectl create namespace mongodb
+    ```
+
+5. Create the kcp kubeconfig for our controller
+
+    ```sh
+    kubectl ws :root:mongodb
+    kubectl config view --minify --flatten > kcp.kubeconfig
+    # set the server to the VirtualWorkspace url
+    kubectl --kubeconfig=kcp.kubeconfig config set-cluster "workspace.kcp.io/current" --server $(kubectl get apiexportendpointslices.apis.kcp.io mongodb -o jsonpath='{.status.endpoints[0].url}')
+    ```
+
+6. Start the controller
+
+    ```sh
+    go run main.go --kcp-kubeconfig=kcp.kubeconfig --target-kubeconfig=cluster.kubeconfig
+    ```
+
+7. Create a MongoDB in the consumer workspace
+
+    ```sh
+    export KUBECONFIG=".kcp/admin.kubeconfig"
+    kubectl ws :root:consumer
+    kubectl apply -f sample/mongodb.yaml
+    ```
+
+    The syncer will sync the mongodb from kcp into the kubernetes cluster. After around a minute you should see in your Kubernetes cluster that the PHASE and VERSION field of your cluster are filled. The syncer will then sync this status into kcp. In the end, you should see the following in your kcp consumer workspace:
+
+    ```sh
+    $ export KUBECONFIG=.kcp/admin.kubeconfig
+    $ k ws :root:consumer
+    $ k -n mongodb get mongodbcommunity.mongodbcommunity.mongodb.com example-mongodb
+    NAME              PHASE     VERSION
+    example-mongodb   Running   6.0.5
+    ```
+
+8. Delete the object again
+
+    ```sh
+    export KUBECONFIG=".kcp/admin.kubeconfig"
+    kubectl ws :root:consumer
+    kubectl delete -f sample/mongodb.yaml
+    ```
+
+    You should now see that the object disappears both in kcp as well as in the downstream cluster.
 
 ## Support, Feedback, Contributing
 
-This project is open to feature requests/suggestions, bug reports etc. via [GitHub issues](https://github.com/platform-mesh/<your-project>/issues). Contribution and feedback are encouraged and always welcome. For more information about how to contribute, the project structure, as well as additional contribution information, see our [Contribution Guidelines](CONTRIBUTING.md).
+This project is open to feature requests/suggestions, bug reports etc. via [GitHub issues](https://github.com/platform-mesh/example-mongodb-multiclusterruntime/issues). Contribution and feedback are encouraged and always welcome. For more information about how to contribute, the project structure, as well as additional contribution information, see our [Contribution Guidelines](CONTRIBUTING.md).
 
 ## Security / Disclosure
-If you find any bug that may be a security problem, please follow our instructions at [in our security policy](https://github.com/platform-mesh/<your-project>/security/policy) on how to report it. Please do not create GitHub issues for security-related doubts or problems.
+
+If you find any bug that may be a security problem, please follow our instructions at [in our security policy](https://github.com/platform-mesh/example-mongodb-multiclusterruntime/security/policy) on how to report it. Please do not create GitHub issues for security-related doubts or problems.
 
 ## Code of Conduct
 
@@ -37,4 +98,4 @@ We as members, contributors, and leaders pledge to make participation in our com
 
 ## Licensing
 
-Copyright (20xx-)20xx SAP SE or an SAP affiliate company and <your-project> contributors. Please see our [LICENSE](LICENSE) for copyright and license information. Detailed information including third-party components and their licensing/copyright information is available [via the REUSE tool](https://api.reuse.software/info/github.com/platform-mesh/<your-project>).
+Copyright (20xx-)20xx SAP SE or an SAP affiliate company and example-mongodb-multiclusterruntime contributors. Please see our [LICENSE](LICENSE) for copyright and license information. Detailed information including third-party components and their licensing/copyright information is available [via the REUSE tool](https://api.reuse.software/info/github.com/platform-mesh/example-mongodb-multiclusterruntime).
