@@ -4,6 +4,41 @@ This example shows how to build a syncher which syncs objects from kcp workspace
 
 It is a barebone example to show that you can build a custom syncher if [api-syncagent](https://github.com/kcp-dev/api-syncagent) is not sufficient for your use-cases. It should be noted that this example does not handle any object collisions or related resources. It is far from production ready!
 
+Here is a high-level workflow for creation:
+
+```mermaid
+sequenceDiagram
+    participant M as k8s cluster with MongoDB Operator
+    participant O as This Operator 
+    actor Y as You
+    participant CW as kcp Consumer Workspace
+
+    O ->> CW: watches
+    Y ->> CW: creates new MongoDB Object
+    CW ->> O: Syncs MongoDB object
+    O ->> M: Syncs MongoDB object
+    M ->> M: Creates Database and <br/> updates status of MongoDB object
+    M ->> O: Syncs back status
+    O ->> CW: Syncs back status
+    Y ->> CW: Retrieve new status
+```
+
+Here is a high-level workflow for deletion:
+
+```mermaid
+sequenceDiagram
+    participant M as k8s cluster with MongoDB Operator
+    participant O as This Operator 
+    actor Y as You
+    participant CW as kcp Consumer Workspace
+
+    O ->> CW: watches
+    Y ->> CW: deletes their MongoDB
+    CW ->> O: Retrieves Info that object got deleted
+    O ->> M: Deletes Object
+    M ->> M: Deletes database
+```
+
 ## How to use this example
 
 1. Create a kind cluster and install the MongoDB Operator
