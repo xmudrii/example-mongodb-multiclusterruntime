@@ -41,27 +41,32 @@ sequenceDiagram
 
 ## How to use this example
 
-1. Create a kind cluster and install the MongoDB Operator
+1. Run the script to create a kind cluster and deploy kcp and cert-manager
 
     ```sh
-    export KUBECONFIG=cluster.kubeconfig
-    kind create cluster --name mongodb
+    ./hack/run-kcp-in-kind.sh
+    ```
+
+2. Deploy the MongoDB Operator in kind cluster
+
+    ```sh
+    export KUBECONFIG="./kind.kubeconfig"
     helm repo add mongodb https://mongodb.github.io/helm-charts
     helm repo update
-    helm upgrade mongodb mongodb/community-operator --version 0.13.0 --install --namespace mongodb --create-namespace
+    helm upgrade \
+        --install \
+        --wait \
+        --namespace mongodb \
+        --create-namespace \
+        --version 0.13.0 \
+        mongodb mongodb/community-operator
     kubectl apply -f sample/mongo-secret.yaml
     ```
 
-2. Start kcp locally
+3. Create the `consumer` and `mongodb` workspaces in kcp
 
     ```sh
-    kcp start --bind-address=127.0.0.1
-    ```
-
-3. Create the consumer and mongodb workspace
-
-    ```sh
-    export KUBECONFIG=".kcp/admin.kubeconfig"
+    export KUBECONFIG="./kcp-admin.kubeconfig"
     kubectl create workspace consumer
     kubectl create workspace mongodb
     ```
@@ -80,21 +85,34 @@ sequenceDiagram
 
     ```sh
     kubectl ws :root:mongodb
-    kubectl config view --minify --flatten > kcp.kubeconfig
+    kubectl config view --minify --flatten > kcp-controller.kubeconfig
     # set the server to the VirtualWorkspace url
-    kubectl --kubeconfig=kcp.kubeconfig config set-cluster "workspace.kcp.io/current" --server $(kubectl get apiexportendpointslices.apis.kcp.io mongodb -o jsonpath='{.status.endpoints[0].url}')
+    VW_URL="$(kubectl get apiexportendpointslices.apis.kcp.io mongodb -o jsonpath='{.status.endpoints[0].url}')"
+    # In the kind setup kcp uses a short service name (kcp:<port>); rewrite it
+    # to include the namespace (kcp.kcp:<port>) so the controller running in
+    # a different namespace can reach it.
+    VW_URL="${VW_URL//kcp:/kcp.kcp:}"
+    kubectl --kubeconfig=kcp-controller.kubeconfig config set-cluster --insecure-skip-tls-verify=true "workspace.kcp.io/current" --server "${VW_URL}"
     ```
 
-6. Start the controller
+6. Switch back to the kind cluster and create a Secret with kubeconfig, then
+   deploy the controller
 
     ```sh
-    go run main.go --kcp-kubeconfig=kcp.kubeconfig --target-kubeconfig=cluster.kubeconfig
+    export KUBECONFIG="./kind.kubeconfig"
+    kubectl create secret generic --namespace="mongodb" kcp-kubeconfig --from-file=kubeconfig=kcp-controller.kubeconfig
+    kubectl apply -f sample/deployment.yaml
     ```
 
-7. Create a MongoDB in the consumer workspace
+    > [!NOTE]
+    > If you're using this sample Deployment in some other setup, remove `hostAliases` from the manifest.
+    > The provided `hostAliases` is used to allow controller to connect to kcp in our kind setup where
+    > `kcp.dev.test` is not a valid domain.
+
+7. Switch back to kcp and create a MongoDB in the `consumer` workspace
 
     ```sh
-    export KUBECONFIG=".kcp/admin.kubeconfig"
+    export KUBECONFIG="./kcp-admin.kubeconfig"
     kubectl ws :root:consumer
     kubectl apply -f sample/mongodb.yaml
     ```
@@ -102,9 +120,8 @@ sequenceDiagram
     The syncer will sync the mongodb from kcp into the kubernetes cluster. After around a minute you should see in your Kubernetes cluster that the PHASE and VERSION field of your cluster are filled. The syncer will then sync this status into kcp. In the end, you should see the following in your kcp consumer workspace:
 
     ```sh
-    $ export KUBECONFIG=.kcp/admin.kubeconfig
-    $ k ws :root:consumer
-    $ k -n mongodb get mongodbcommunity.mongodbcommunity.mongodb.com example-mongodb
+    kubectl ws :root:consumer
+    kubectl -n mongodb get mongodbcommunity.mongodbcommunity.mongodb.com example-mongodb
     NAME              PHASE     VERSION
     example-mongodb   Running   6.0.5
     ```
@@ -112,7 +129,6 @@ sequenceDiagram
 8. Delete the object again
 
     ```sh
-    export KUBECONFIG=".kcp/admin.kubeconfig"
     kubectl ws :root:consumer
     kubectl delete -f sample/mongodb.yaml
     ```

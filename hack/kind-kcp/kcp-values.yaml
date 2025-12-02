@@ -1,0 +1,26 @@
+externalHostname: "kcp.dev.test"
+externalPort: "8443"
+etcd:
+  resources:
+    requests:
+      memory: 256Mi
+certificates:
+  dnsNames:
+    - localhost
+    - kcp.dev.test
+kcp:
+  # tag is set via --set flag to make it more dynamic for testing purposes
+  volumeClassName: "standard"
+  tokenAuth:
+    enabled: true
+  hostAliases:
+    enabled: true
+    values:
+      - ip: "10.96.0.100"
+        hostnames:
+          - "kcp.dev.test"
+kcpFrontProxy:
+  service:
+    type: NodePort
+    nodePort: 31443
+    clusterIP: "10.96.0.100"
